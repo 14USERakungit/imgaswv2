@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Fullscreen Image Gallery</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden;
+        }
+
+        /* Container utama galeri */
+        #gallery {
+            width: 100vw;
+            height: 100vh;
+            overflow-y: scroll;
+            scroll-snap-type: y mandatory;
+            scroll-behavior: smooth;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            cursor: grab;
+        }
+
+        #gallery::-webkit-scrollbar {
+            display: none;
+        }
+
+        #gallery:active {
+            cursor: grabbing;
+        }
+
+        /* Setiap slide gambar */
+        .slide {
+            width: 100vw;
+            height: 100vh;
+            scroll-snap-align: start;
+            scroll-snap-stop: always;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Wrapper gambar untuk Zoom & Pan */
+        .zoom-wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform-origin: center center;
+            transition: transform 0.15s ease-out;
+            will-change: transform;
+        }
+
+        .slide img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+            -webkit-user-drag: none;
+        }
+
+        /* Lapisan pelindung transparan anti klik-kanan & drag */
+        .protect-shield {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            background: transparent;
+        }
+
+        /* Kontrol melayang di bawah */
+        .hud {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(18, 18, 18, 0.78);
+            backdrop-filter: blur(10px);
+            padding: 8px 16px;
+            border-radius: 30px;
+            font-size: 13px;
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            white-space: nowrap;
+        }
+
+        .badge {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.12);
+            color: #ccc;
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .hud button {
+            background: rgba(255, 255, 255, 0.15);
+            border: none;
+            color: #fff;
+            padding: 5px 11px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .hud button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .hud button.active {
+            background: rgba(255, 255, 255, 0.35);
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
+        }
+
+        .zoom-controls {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            border-left: 1px solid rgba(255, 255, 255, 0.2);
+            padding-left: 10px;
+        }
+
+        #zoomLevelText {
+            font-size: 12px;
+            min-width: 38px;
+            text-align: center;
+            color: #ddd;
+        }
+
+        /* Tombol navigasi atas/bawah di layar besar */
+        .nav-btn {
+            position: fixed;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: white;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            cursor: pointer;
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        #prevBtn { top: calc(50% - 50px); }
+        #nextBtn { top: calc(50% + 10px); }
+
+        @media (max-width: 768px) {
+            .nav-btn { display: none; }
+            .hud {
+                padding: 7px 12px;
+                gap: 7px;
+                font-size: 12px;
+            }
+            .badge { display: none; }
+        }
+    </style>
+</head>
+<body oncontextmenu="return false;" ondragstart="return false;" onselectstart="return false;">
+
+    <div id="gallery"></div>
+
+    <button class="nav-btn" id="prevBtn" title="Sebelumnya">▲</button>
+    <button class="nav-btn" id="nextBtn" title="Berikutnya">▼</button>
+
+    <div class="hud">
+        <span id="counter">0 / 0</span>
+        <span id="statusBadge" class="badge">Memuat...</span>
+        <button id="slideShowBtn" title="Auto Slideshow">▶ Auto</button>
+        <button id="fitBtn">Fit</button>
+        <div class="zoom-controls">
+            <button id="zoomOutBtn" title="Perkecil">−</button>
+            <span id="zoomLevelText">1.0x</span>
+            <button id="zoomInBtn" title="Perbesar">+</button>
+            <button id="zoomResetBtn" title="Reset Zoom">Reset</button>
+        </div>
+    </div>
+
+    <script>
+        // =====================================================================
+        // PROTEKSI ANTI-DOWNLOAD & ANTI-INSPECT PINTASAN
+        // =====================================================================
+        document.addEventListener('contextmenu', e => e.preventDefault());
+        document.addEventListener('dragstart', e => e.preventDefault());
+        document.addEventListener('keydown', (e) => {
+            if (
+                (e.ctrlKey && ['s', 'u', 'p', 'a'].includes(e.key.toLowerCase())) ||
+                (e.ctrlKey && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase())) ||
+                e.key === 'F12'
+            ) {
+                e.preventDefault();
+                return false;
+            }
+        });
+
+        // =====================================================================
+        // KONFIGURASI FOLDER GAMBAR (AUTO-DETEKSI GITHUB PAGES & LOKAL)
+        // =====================================================================
+        const MANUAL_GITHUB_USER = '';
+        const MANUAL_GITHUB_REPO = '';
+        const FOLDER = 'img';
+        const SLIDESHOW_INTERVAL_MS = 3500; // Interval auto-slideshow (3.5 detik)
+        // =====================================================================
+
+        const gallery = document.getElementById('gallery');
+        const counter = document.getElementById('counter');
+        const statusBadge = document.getElementById('statusBadge');
+        const fitBtn = document.getElementById('fitBtn');
+        const slideShowBtn = document.getElementById('slideShowBtn');
+        const zoomLevelText = document.getElementById('zoomLevelText');
+
+        let isCover = false;
+        let totalSlides = 0;
+        let slideshowTimer = null;
+
+        const slideInfos = [];
+        const slideZoomStates = [];
+
+        function addSlide(rawUrl, displayName) {
+            const slideIndex = totalSlides;
+            totalSlides++;
+
+            const fileName = displayName || decodeURIComponent(rawUrl.split('/').pop());
+
+            const slide = document.createElement('div');
+            slide.className = 'slide';
+
+            // Wrapper untuk efek Zoom & Pan
+            const zoomWrapper = document.createElement('div');
+            zoomWrapper.className = 'zoom-wrapper';
+
+            const img = document.createElement('img');
+            img.src = rawUrl;
+            img.alt = fileName;
+            img.loading = 'lazy';
+            img.draggable = false;
+            img.style.objectFit = isCover ? 'cover' : 'contain';
+
+            // Hapus slide otomatis jika file gambar rusak/gagal dimuat
+            img.onerror = () => {
+                slide.remove();
+                recalculateSlides();
+            };
+
+            // Lapisan pelindung anti-download / klik kanan
+            const shield = document.createElement('div');
+            shield.className = 'protect-shield';
+
+            zoomWrapper.appendChild(img);
+            slide.appendChild(zoomWrapper);
+            slide.appendChild(shield);
+            gallery.appendChild(slide);
+
+            slideInfos[slideIndex] = { info: fileName };
+            slideZoomStates[slideIndex] = { scale: 1, x: 0, y: 0, wrapper: zoomWrapper };
+
+            setupSlideInteraction(slide, slideIndex);
+        }
+
+        function recalculateSlides() {
+            const activeSlides = gallery.querySelectorAll('.slide');
+            totalSlides = activeSlides.length;
+            updateHUD();
+        }
+
+        // =====================================================================
+        // AUTO SLIDESHOW
+        // =====================================================================
+        function toggleSlideshow() {
+            if (slideshowTimer) {
+                clearInterval(slideshowTimer);
+                slideshowTimer = null;
+                slideShowBtn.textContent = '▶ Auto';
+                slideShowBtn.classList.remove('active');
+            } else {
+                if (totalSlides <= 1) return;
+                slideShowBtn.textContent = '⏸ Stop';
+                slideShowBtn.classList.add('active');
+                slideshowTimer = setInterval(() => {
+                    const currentIdx = getCurrentSlideIndex();
+                    if (currentIdx >= totalSlides - 1) {
+                        if (slideZoomStates[currentIdx]?.scale > 1) setZoom(currentIdx, 1);
+                        gallery.scrollTo({ top: 0, behavior: 'smooth' });
+                    } else {
+                        goToSlide(1, true);
+                    }
+                }, SLIDESHOW_INTERVAL_MS);
+            }
+        }
+
+        function stopSlideshowOnManualAction() {
+            if (slideshowTimer) {
+                clearInterval(slideshowTimer);
+                slideshowTimer = null;
+                slideShowBtn.textContent = '▶ Auto';
+                slideShowBtn.classList.remove('active');
+            }
+        }
+
+        slideShowBtn.addEventListener('click', toggleSlideshow);
+
+        // =====================================================================
+        // LOGIKA ZOOM IN / OUT & PAN (GESER SAAT DI-ZOOM)
+        // =====================================================================
+        function getCurrentSlideIndex() {
+            if (totalSlides === 0) return 0;
+            return Math.min(Math.round(gallery.scrollTop / window.innerHeight), totalSlides - 1);
+        }
+
+        function applyTransform(index, instant = false) {
+            const state = slideZoomStates[index];
+            if (!state) return;
+
+            const maxPanX = (window.innerWidth * (state.scale - 1)) / 2;
+            const maxPanY = (window.innerHeight * (state.scale - 1)) / 2;
+            state.x = Math.max(-maxPanX, Math.min(maxPanX, state.x));
+            state.y = Math.max(-maxPanY, Math.min(maxPanY, state.y));
+
+            if (state.scale <= 1) {
+                state.scale = 1;
+                state.x = 0;
+                state.y = 0;
+            }
+
+            state.wrapper.style.transition = instant ? 'none' : 'transform 0.15s ease-out';
+            state.wrapper.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+
+            if (index === getCurrentSlideIndex()) {
+                gallery.style.overflowY = state.scale > 1 ? 'hidden' : 'scroll';
+                zoomLevelText.textContent = `${state.scale.toFixed(1)}x`;
+            }
+        }
+
+        function setZoom(index, newScale) {
+            const state = slideZoomStates[index];
+            if (!state) return;
+            if (newScale > 1) stopSlideshowOnManualAction();
+            state.scale = Math.max(1, Math.min(4, newScale));
+            applyTransform(index);
+        }
+
+        function setupSlideInteraction(slide, index) {
+            let lastTap = 0;
+
+            // Double-Click / Double-Tap untuk Toggle Zoom
+            slide.addEventListener('click', () => {
+                const now = Date.now();
+                if (now - lastTap < 280) {
+                    const state = slideZoomStates[index];
+                    if (state.scale > 1) {
+                        setZoom(index, 1);
+                    } else {
+                        setZoom(index, 2.5);
+                    }
+                }
+                lastTap = now;
+            });
+
+            // Scroll Wheel (Ctrl + Scroll atau Scroll saat sudah zoom)
+            slide.addEventListener('wheel', (e) => {
+                const state = slideZoomStates[index];
+                if (e.ctrlKey || state.scale > 1) {
+                    e.preventDefault();
+                    const delta = e.deltaY < 0 ? 0.3 : -0.3;
+                    setZoom(index, state.scale + delta);
+                } else {
+                    stopSlideshowOnManualAction();
+                }
+            }, { passive: false });
+
+            // Geser (Pan) gambar saat di-zoom dengan Mouse
+            let isPanning = false;
+            let startX = 0, startY = 0;
+
+            slide.addEventListener('mousedown', (e) => {
+                const state = slideZoomStates[index];
+                if (state.scale <= 1) return;
+                e.stopPropagation();
+                isPanning = true;
+                startX = e.clientX - state.x;
+                startY = e.clientY - state.y;
+                slide.style.cursor = 'grabbing';
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isPanning) return;
+                const state = slideZoomStates[index];
+                state.x = e.clientX - startX;
+                state.y = e.clientY - startY;
+                applyTransform(index, true);
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isPanning) {
+                    isPanning = false;
+                    slide.style.cursor = 'grab';
+                }
+            });
+
+            // Touch Pinch-to-Zoom & Touch Pan di HP/Tablet
+            let initialPinchDist = null;
+            let initialScale = 1;
+            let touchStartX = 0, touchStartY = 0;
+
+            slide.addEventListener('touchstart', (e) => {
+                stopSlideshowOnManualAction();
+                const state = slideZoomStates[index];
+                if (e.touches.length === 2) {
+                    initialPinchDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    initialScale = state.scale;
+                } else if (e.touches.length === 1 && state.scale > 1) {
+                    touchStartX = e.touches[0].clientX - state.x;
+                    touchStartY = e.touches[0].clientY - state.y;
+                }
+            }, { passive: true });
+
+            slide.addEventListener('touchmove', (e) => {
+                const state = slideZoomStates[index];
+                if (e.touches.length === 2 && initialPinchDist) {
+                    e.preventDefault();
+                    const currentDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    const scaleFactor = currentDist / initialPinchDist;
+                    state.scale = Math.max(1, Math.min(4, initialScale * scaleFactor));
+                    applyTransform(index, true);
+                } else if (e.touches.length === 1 && state.scale > 1) {
+                    e.preventDefault();
+                    state.x = e.touches[0].clientX - touchStartX;
+                    state.y = e.touches[0].clientY - touchStartY;
+                    applyTransform(index, true);
+                }
+            }, { passive: false });
+
+            slide.addEventListener('touchend', () => {
+                initialPinchDist = null;
+            });
+        }
+
+        document.getElementById('zoomInBtn').addEventListener('click', () => {
+            const idx = getCurrentSlideIndex();
+            if (slideZoomStates[idx]) setZoom(idx, slideZoomStates[idx].scale + 0.5);
+        });
+
+        document.getElementById('zoomOutBtn').addEventListener('click', () => {
+            const idx = getCurrentSlideIndex();
+            if (slideZoomStates[idx]) setZoom(idx, slideZoomStates[idx].scale - 0.5);
+        });
+
+        document.getElementById('zoomResetBtn').addEventListener('click', () => {
+            const idx = getCurrentSlideIndex();
+            if (slideZoomStates[idx]) setZoom(idx, 1);
+        });
+
+        // =====================================================================
+        // DETEKSI OTOMATIS REPO GITHUB & MUAT SEMUA FILE GAMBAR DI FOLDER 'img'
+        // =====================================================================
+        function detectGitHubInfo() {
+            if (MANUAL_GITHUB_USER && MANUAL_GITHUB_REPO) {
+                return { owner: MANUAL_GITHUB_USER, repo: MANUAL_GITHUB_REPO, subPath: '' };
+            }
+            const host = window.location.hostname;
+            const pathParts = window.location.pathname.split('/').filter(Boolean);
+
+            if (host.endsWith('.github.io')) {
+                const owner = host.replace('.github.io', '');
+                const repo = pathParts.length > 0 ? pathParts[0] : `${owner}.github.io`;
+                const dirParts = pathParts.slice(1);
+                if (dirParts.length > 0 && dirParts[dirParts.length - 1].includes('.')) {
+                    dirParts.pop();
+                }
+                const subPath = dirParts.join('/');
+                return { owner, repo, subPath };
+            }
+            return null;
+        }
+
+        async function init() {
+            const imgRegex = /\.(jpg|jpeg|png|gif|webp|avif|svg|bmp|ico)$/i;
+
+            // 1. Jika dibuka di GitHub Pages (*.github.io) atau MANUAL_GITHUB_USER diisi
+            const ghInfo = detectGitHubInfo();
+            if (ghInfo) {
+                try {
+                    statusBadge.textContent = 'Memindai GitHub...';
+                    const targetFolder = ghInfo.subPath ? `${ghInfo.subPath}/${FOLDER}` : FOLDER;
+                    const cacheKey = `gh_img_list_${ghInfo.owner}_${ghInfo.repo}_${targetFolder}`;
+
+                    let fileNames = null;
+                    const cached = sessionStorage.getItem(cacheKey);
+                    if (cached) {
+                        fileNames = JSON.parse(cached);
+                    } else {
+                        const apiUrl = `https://api.github.com/repos/${ghInfo.owner}/${ghInfo.repo}/contents/${targetFolder}`;
+                        const res = await fetch(apiUrl);
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        const items = await res.json();
+
+                        fileNames = items
+                            .filter(item => item.type === 'file' && imgRegex.test(item.name))
+                            .map(item => item.name)
+                            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+                        sessionStorage.setItem(cacheKey, JSON.stringify(fileNames));
+                    }
+
+                    if (fileNames && fileNames.length > 0) {
+                        fileNames.forEach(name => {
+                            addSlide(`${FOLDER}/${encodeURIComponent(name)}`, name);
+                        });
+                        updateHUD();
+                        return;
+                    } else {
+                        statusBadge.textContent = 'Folder img kosong';
+                        return;
+                    }
+                } catch (err) {
+                    console.warn('GitHub API fallback:', err);
+                    statusBadge.textContent = 'Gagal baca API';
+                }
+            }
+
+            // 2. Fallback untuk server lokal (Live Server / Python http.server / Nginx / Apache)
+            try {
+                const res = await fetch(`${FOLDER}/`);
+                if (res.ok) {
+                    const html = await res.text();
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    const links = Array.from(doc.querySelectorAll('a'))
+                        .map(a => a.getAttribute('href'))
+                        .filter(href => href && imgRegex.test(href))
+                        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+                    if (links.length > 0) {
+                        links.forEach(href => {
+                            const cleanName = decodeURIComponent(href.split('/').pop());
+                            addSlide(`${FOLDER}/${encodeURIComponent(cleanName)}`, cleanName);
+                        });
+                        updateHUD();
+                        return;
+                    }
+                }
+            } catch (e) {}
+
+            statusBadge.textContent = 'Tidak ada gambar';
+            counter.textContent = '0 Gambar';
+        }
+
+        function updateHUD() {
+            const slides = gallery.querySelectorAll('.slide');
+            totalSlides = slides.length;
+            if (totalSlides === 0) {
+                counter.textContent = '0 Gambar';
+                return;
+            }
+
+            const currentIdx = getCurrentSlideIndex();
+            counter.textContent = `${currentIdx + 1} / ${totalSlides}`;
+
+            if (slideInfos[currentIdx]) {
+                statusBadge.textContent = slideInfos[currentIdx].info;
+            }
+        }
+
+        gallery.addEventListener('scroll', updateHUD);
+
+        fitBtn.addEventListener('click', () => {
+            isCover = !isCover;
+            fitBtn.textContent = isCover ? 'Cover' : 'Fit';
+            document.querySelectorAll('.slide img').forEach(img => {
+                img.style.objectFit = isCover ? 'cover' : 'contain';
+            });
+        });
+
+        function goToSlide(dir, fromAuto = false) {
+            if (!fromAuto) stopSlideshowOnManualAction();
+            const currentIdx = getCurrentSlideIndex();
+            if (slideZoomStates[currentIdx] && slideZoomStates[currentIdx].scale > 1) {
+                setZoom(currentIdx, 1);
+            }
+            gallery.scrollTo({
+                top: gallery.scrollTop + (dir * window.innerHeight),
+                behavior: 'smooth'
+            });
+        }
+
+        document.getElementById('prevBtn').addEventListener('click', () => goToSlide(-1));
+        document.getElementById('nextBtn').addEventListener('click', () => goToSlide(1));
+
+        window.addEventListener('keydown', (e) => {
+            const idx = getCurrentSlideIndex();
+            if (e.key === '+' || e.key === '=') {
+                e.preventDefault();
+                if (slideZoomStates[idx]) setZoom(idx, slideZoomStates[idx].scale + 0.5);
+            } else if (e.key === '-') {
+                e.preventDefault();
+                if (slideZoomStates[idx]) setZoom(idx, slideZoomStates[idx].scale - 0.5);
+            } else if (e.key === '0') {
+                e.preventDefault();
+                if (slideZoomStates[idx]) setZoom(idx, 1);
+            } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                goToSlide(1);
+            } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                e.preventDefault();
+                goToSlide(-1);
+            } else if (e.key === ' ') {
+                e.preventDefault();
+                toggleSlideshow();
+            }
+        });
+
+        let isDown = false;
+        let startY = 0;
+        let scrollTopStart = 0;
+
+        gallery.addEventListener('mousedown', (e) => {
+            const idx = getCurrentSlideIndex();
+            if (slideZoomStates[idx] && slideZoomStates[idx].scale > 1) return;
+
+            stopSlideshowOnManualAction();
+            isDown = true;
+            gallery.style.scrollSnapType = 'none';
+            gallery.style.scrollBehavior = 'auto';
+            startY = e.pageY;
+            scrollTopStart = gallery.scrollTop;
+        });
+
+        const stopDrag = () => {
+            if (!isDown) return;
+            isDown = false;
+            gallery.style.scrollBehavior = 'smooth';
+            gallery.style.scrollSnapType = 'y mandatory';
+            const target = Math.round(gallery.scrollTop / window.innerHeight);
+            gallery.scrollTo({ top: target * window.innerHeight, behavior: 'smooth' });
+        };
+
+        gallery.addEventListener('mouseup', stopDrag);
+        gallery.addEventListener('mouseleave', stopDrag);
+
+        gallery.addEventListener('mousemove', (e) => {
+            if (!isDown) return;
+            e.preventDefault();
+            const walk = (e.pageY - startY) * 1.5;
+            gallery.scrollTop = scrollTopStart - walk;
+        });
+
+        init();
+    </script>
+</body>
+</html>
